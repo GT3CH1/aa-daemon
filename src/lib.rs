@@ -4,6 +4,7 @@ use serde_json::Value;
 use warp::{Filter, Rejection, http};
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
+use isahc;
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct DeviceState {
