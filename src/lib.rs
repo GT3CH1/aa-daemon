@@ -1,7 +1,8 @@
 use aa_models::*;
 use aa_consts::*;
 use serde_json::Value;
-use warp::{Filter, Rejection,http};
+use warp::{Filter, Rejection, http};
+use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,7 +32,7 @@ struct FirebaseToken {
 }
 
 #[tokio::main]
-pub(crate) async fn run() {
+pub async fn run() {
     let cors = warp::cors::cors().allow_any_origin()
         .allow_headers(vec!["x-auth-id", "x-api-key", "User-Agent", "Sec-Fetch-Mode", "Referer", "Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers", "Content-Type"])
         .allow_methods(vec!["GET", "POST", "PUT"]);
@@ -138,14 +139,14 @@ async fn send_request(state: DeviceState, api_token: String, uid: String) -> Res
 
         // Parse the state
         let json = state.state;
-        if models::sqlsprinkler::check_if_zone(&state.guid) {
+        if sqlsprinkler::check_if_zone(&state.guid) {
             // Match the device to a sprinkler zone
             let _state: bool = serde_json::from_value(json).unwrap();
             let id = match device.sw_version.parse::<i64>() {
                 Ok(r) => r - 1,
                 Err(..) => 0
             };
-            let status = models::sqlsprinkler::set_zone(device.ip, _state, id);
+            let status = sqlsprinkler::set_zone(device.ip, _state, id);
             let response = match status {
                 true => "ok",
                 false => "fail",
@@ -153,10 +154,10 @@ async fn send_request(state: DeviceState, api_token: String, uid: String) -> Res
             Ok(warp::reply::with_status(response.to_string(), http::StatusCode::OK))
         } else {
             match device.kind {
-                models::device::DeviceType::SqlSprinklerHost => {
+                device::DeviceType::SqlSprinklerHost => {
                     // If the device is a sql sprinkler host, we need to send a request to it...
                     let _state: bool = serde_json::from_value(json).unwrap();
-                    let status = models::sqlsprinkler::set_system(device.ip, _state);
+                    let status = sqlsprinkler::set_system(device.ip, _state);
                     let response = match status {
                         true => "ok",
                         false => "fail",
@@ -164,17 +165,17 @@ async fn send_request(state: DeviceState, api_token: String, uid: String) -> Res
                     Ok(warp::reply::with_status(response.to_string(), http::StatusCode::OK))
                 }
 
-                models::device::DeviceType::TV => {
+                device::DeviceType::TV => {
                     // Check if the device is a LG TV.
                     if json["volumeLevel"] != serde_json::json!(null) {
-                        let vol_state: models::tv::SetVolState = serde_json::from_value(json["volumeLevel"].clone()).unwrap();
-                        models::tv::set_volume_state(vol_state);
+                        let vol_state: tv::SetVolState = serde_json::from_value(json["volumeLevel"].clone()).unwrap();
+                        tv::set_volume_state(vol_state);
                     } else if json["mute"] != serde_json::json!(null) {
-                        let mute_state: models::tv::SetMuteState = serde_json::from_value(json["mute"].clone()).unwrap();
-                        models::tv::set_mute_state(mute_state);
+                        let mute_state: tv::SetMuteState = serde_json::from_value(json["mute"].clone()).unwrap();
+                        tv::set_mute_state(mute_state);
                     } else {
                         let _state: bool = serde_json::from_value(json).unwrap();
-                        models::tv::set_power_state(_state);
+                        tv::set_power_state(_state);
                     }
                     Ok(warp::reply::with_status("set volume state".to_string(), http::StatusCode::OK))
                 }

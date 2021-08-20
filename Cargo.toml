@@ -9,6 +9,8 @@ edition = "2018"
 aa-models = { git =  "https://github.com/GT3CH1/aa-models"}
 aa-consts = { git =  "ssh://git@github.com/GT3CH1/aa-consts"}
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1.0.2", features = ["full"] }
 warp = "0.3"
 parking_lot = "0.10.0"
+isahc = "1.4.0"
