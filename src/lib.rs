@@ -5,6 +5,7 @@ use warp::{Filter, Rejection, http};
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use isahc;
+use aa_models::device::GoogleDevice;
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct DeviceState {
@@ -218,7 +219,7 @@ async fn list_devices_google(api_token: String, uid: String) -> Result<impl warp
         let mut json_arr = vec![];
 
         for device in devices.iter() {
-            json_arr.push(device.to_google_device());
+            json_arr.push(device.google_smarthome_json());
         }
 
         let json_output = serde_json::json!(json_arr);
