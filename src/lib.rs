@@ -1,11 +1,11 @@
-use aa_models::*;
 use aa_consts::*;
-use serde_json::Value;
-use warp::{Filter, Rejection, http};
-use serde::{Serialize, Deserialize};
-use std::collections::HashMap;
-use isahc;
 use aa_models::device::GoogleDevice;
+use aa_models::*;
+use isahc;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
+use warp::{http, Filter, Rejection};
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct DeviceState {
@@ -35,8 +35,19 @@ struct FirebaseToken {
 
 #[tokio::main]
 pub async fn run() {
-    let cors = warp::cors::cors().allow_any_origin()
-        .allow_headers(vec!["x-auth-id", "x-api-key", "User-Agent", "Sec-Fetch-Mode", "Referer", "Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers", "Content-Type"])
+    let cors = warp::cors::cors()
+        .allow_any_origin()
+        .allow_headers(vec![
+            "x-auth-id",
+            "x-api-key",
+            "User-Agent",
+            "Sec-Fetch-Mode",
+            "Referer",
+            "Origin",
+            "Access-Control-Request-Method",
+            "Access-Control-Request-Headers",
+            "Content-Type",
+        ])
         .allow_methods(vec!["GET", "POST", "PUT"]);
 
     let route = warp::any().map(warp::reply).with(&cors);
@@ -86,10 +97,15 @@ pub async fn run() {
         .and(warp::body::form())
         .map(|_map: HashMap<String, String>| {
             let mut status = "".to_string();
-            if _map.contains_key("guid") && _map.contains_key("ip") && _map.contains_key("state") && _map.contains_key("sw_version") {
+            if _map.contains_key("guid")
+                && _map.contains_key("ip")
+                && _map.contains_key("state")
+                && _map.contains_key("sw_version")
+            {
                 let guid = _map.get("guid").unwrap().to_string();
                 let ip = _map.get("ip").unwrap().to_string();
-                let state: Value = serde_json::from_str(_map.get("state").unwrap().as_str()).unwrap();
+                let state: Value =
+                    serde_json::from_str(_map.get("state").unwrap().as_str()).unwrap();
                 let sw_version: String = _map.get("sw_version").unwrap().to_string();
                 let device_update = DeviceUpdate {
                     guid,
@@ -108,32 +124,31 @@ pub async fn run() {
         .or(get_device_status)
         .or(list_google_devices)
         .or(route);
-    warp::serve(routes)
-        .run(([0, 0, 0, 0], 3030))
-        .await;
+    warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
 }
 
-fn auth_request() -> impl Filter<Extract=(String, String, ), Error=Rejection> + Copy {
-    warp::header::<String>("x-api-key").and(
-        warp::header::<String>("x-auth-id"))
+fn auth_request() -> impl Filter<Extract = (String, String), Error = Rejection> + Copy {
+    warp::header::<String>("x-api-key").and(warp::header::<String>("x-auth-id"))
 }
 
 /// Used to filter a put request to change the system status
-fn sys_post() -> impl Filter<Extract=(DeviceState, ), Error=warp::Rejection> + Clone {
-    warp::body::content_length_limit(1024 * 16)
-        .and(warp::body::json())
+fn sys_post() -> impl Filter<Extract = (DeviceState,), Error = warp::Rejection> + Clone {
+    warp::body::content_length_limit(1024 * 16).and(warp::body::json())
 }
 
 /// Used to filter a put request to send an update to the database
-fn sys_put() -> impl Filter<Extract=(DeviceUpdate, ), Error=warp::Rejection> + Clone {
-    warp::body::content_length_limit(1024 * 16)
-        .and(warp::body::json())
+fn sys_put() -> impl Filter<Extract = (DeviceUpdate,), Error = warp::Rejection> + Clone {
+    warp::body::content_length_limit(1024 * 16).and(warp::body::json())
 }
 
 /// Sends a change state request to the device.
 /// # Params
 /// * `state` A DeviceState representing the device we want to change.
-async fn send_request(state: DeviceState, api_token: String, uid: String) -> Result<impl warp::Reply, warp::Rejection> {
+async fn send_request(
+    state: DeviceState,
+    api_token: String,
+    uid: String,
+) -> Result<impl warp::Reply, warp::Rejection> {
     if !check_auth(api_token, uid) {
         Err(warp::reject())
     } else {
@@ -146,14 +161,17 @@ async fn send_request(state: DeviceState, api_token: String, uid: String) -> Res
             let _state: bool = serde_json::from_value(json).unwrap();
             let id = match device.sw_version.parse::<i64>() {
                 Ok(r) => r - 1,
-                Err(..) => 0
+                Err(..) => 0,
             };
             let status = sqlsprinkler::set_zone(device.ip, _state, id);
             let response = match status {
                 true => "ok",
                 false => "fail",
             };
-            Ok(warp::reply::with_status(response.to_string(), http::StatusCode::OK))
+            Ok(warp::reply::with_status(
+                response.to_string(),
+                http::StatusCode::OK,
+            ))
         } else {
             match device.kind {
                 device::DeviceType::SqlSprinklerHost => {
@@ -164,22 +182,30 @@ async fn send_request(state: DeviceState, api_token: String, uid: String) -> Res
                         true => "ok",
                         false => "fail",
                     };
-                    Ok(warp::reply::with_status(response.to_string(), http::StatusCode::OK))
+                    Ok(warp::reply::with_status(
+                        response.to_string(),
+                        http::StatusCode::OK,
+                    ))
                 }
 
                 device::DeviceType::TV => {
                     // Check if the device is a LG TV.
                     if json["volumeLevel"] != serde_json::json!(null) {
-                        let vol_state: tv::SetVolState = serde_json::from_value(json["volumeLevel"].clone()).unwrap();
+                        let vol_state: tv::SetVolState =
+                            serde_json::from_value(json["volumeLevel"].clone()).unwrap();
                         tv::set_volume_state(vol_state);
                     } else if json["mute"] != serde_json::json!(null) {
-                        let mute_state: tv::SetMuteState = serde_json::from_value(json["mute"].clone()).unwrap();
+                        let mute_state: tv::SetMuteState =
+                            serde_json::from_value(json["mute"].clone()).unwrap();
                         tv::set_mute_state(mute_state);
                     } else {
                         let _state: bool = serde_json::from_value(json).unwrap();
                         tv::set_power_state(_state);
                     }
-                    Ok(warp::reply::with_status("set volume state".to_string(), http::StatusCode::OK))
+                    Ok(warp::reply::with_status(
+                        "set volume state".to_string(),
+                        http::StatusCode::OK,
+                    ))
                 }
 
                 // Everything else is an arduino.
@@ -189,9 +215,13 @@ async fn send_request(state: DeviceState, api_token: String, uid: String) -> Res
                         true => "on",
                         false => "off",
                     };
-                    let url = device.get_api_url_with_param(endpoint.to_string(), device.guid.to_string());
+                    let url = device
+                        .get_api_url_with_param(endpoint.to_string(), device.guid.to_string());
                     isahc::get(url).unwrap().status().is_success();
-                    Ok(warp::reply::with_status("ok".to_string(), http::StatusCode::OK))
+                    Ok(warp::reply::with_status(
+                        "ok".to_string(),
+                        http::StatusCode::OK,
+                    ))
                 }
             }
         }
@@ -210,7 +240,10 @@ async fn list_devices(api_token: String, uid: String) -> Result<impl warp::Reply
 }
 
 // fn list_devices_google(token: String) -> String {
-async fn list_devices_google(api_token: String, uid: String) -> Result<impl warp::Reply, warp::Rejection> {
+async fn list_devices_google(
+    api_token: String,
+    uid: String,
+) -> Result<impl warp::Reply, warp::Rejection> {
     if !check_auth(api_token, uid.clone()) {
         Err(warp::reject())
     } else {
@@ -242,11 +275,10 @@ fn database_update(_device: DeviceUpdate) -> String {
     device.sw_version = _device.sw_version;
     let status = match device.database_update() {
         true => "updated".to_string(),
-        false => "an error occurred.".to_string()
+        false => "an error occurred.".to_string(),
     };
     status
 }
-
 
 /// Checks whether or not that the user id has the correct api token.
 fn check_auth(api_token: String, uid: String) -> bool {
