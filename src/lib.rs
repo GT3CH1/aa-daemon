@@ -150,80 +150,64 @@ async fn send_request(
     uid: String,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     if !check_auth(api_token, uid) {
-        Err(warp::reject())
-    } else {
-        let device = device::get_device_from_guid(&state.guid);
+       return Err(warp::reject())
+    }
 
-        // Parse the state
-        let json = state.state;
-        if sqlsprinkler::check_if_zone(&state.guid) {
+    let device = device::get_device_from_guid(&state.guid);
+    let json = state.state;
+
+    match device.kind {
+        device::DeviceType::SqlSprinklerHost => {
+            // If the device is a sql sprinkler host, we need to send a request to it...
+            let _state: bool = serde_json::from_value(json).unwrap();
+            let status = sqlsprinkler::set_system(device.ip, _state);
+            let response = match status {
+                true => "ok",
+                false => "fail",
+            };
+            Ok(warp::reply::with_status(response.to_string(), http::StatusCode::OK))
+        }
+
+        device::DeviceType::SPRINKLER => {
             // Match the device to a sprinkler zone
             let _state: bool = serde_json::from_value(json).unwrap();
             let id = match device.sw_version.parse::<i64>() {
                 Ok(r) => r - 1,
-                Err(..) => 0,
+                Err(..) => 0
             };
             let status = sqlsprinkler::set_zone(device.ip, _state, id);
             let response = match status {
                 true => "ok",
                 false => "fail",
             };
-            Ok(warp::reply::with_status(
-                response.to_string(),
-                http::StatusCode::OK,
-            ))
-        } else {
-            match device.kind {
-                device::DeviceType::SqlSprinklerHost => {
-                    // If the device is a sql sprinkler host, we need to send a request to it...
-                    let _state: bool = serde_json::from_value(json).unwrap();
-                    let status = sqlsprinkler::set_system(device.ip, _state);
-                    let response = match status {
-                        true => "ok",
-                        false => "fail",
-                    };
-                    Ok(warp::reply::with_status(
-                        response.to_string(),
-                        http::StatusCode::OK,
-                    ))
-                }
+            Ok(warp::reply::with_status(response.to_string(), http::StatusCode::OK))
+        }
 
-                device::DeviceType::TV => {
-                    // Check if the device is a LG TV.
-                    if json["volumeLevel"] != serde_json::json!(null) {
-                        let vol_state: tv::SetVolState =
-                            serde_json::from_value(json["volumeLevel"].clone()).unwrap();
-                        tv::set_volume_state(vol_state);
-                    } else if json["mute"] != serde_json::json!(null) {
-                        let mute_state: tv::SetMuteState =
-                            serde_json::from_value(json["mute"].clone()).unwrap();
-                        tv::set_mute_state(mute_state);
-                    } else {
-                        let _state: bool = serde_json::from_value(json).unwrap();
-                        tv::set_power_state(_state);
-                    }
-                    Ok(warp::reply::with_status(
-                        "set volume state".to_string(),
-                        http::StatusCode::OK,
-                    ))
-                }
-
-                // Everything else is an arduino.
-                _ => {
-                    let _state: bool = serde_json::from_value(json.clone()).unwrap();
-                    let endpoint = match _state {
-                        true => "on",
-                        false => "off",
-                    };
-                    let url = device
-                        .get_api_url_with_param(endpoint.to_string(), device.guid.to_string());
-                    isahc::get(url).unwrap().status().is_success();
-                    Ok(warp::reply::with_status(
-                        "ok".to_string(),
-                        http::StatusCode::OK,
-                    ))
-                }
+        device::DeviceType::TV => {
+            // Check if the device is a LG TV.
+            if json["volumeLevel"] != serde_json::json!(null) {
+                let vol_state: tv::SetVolState = serde_json::from_value(json["volumeLevel"].clone()).unwrap();
+                tv::set_volume_state(vol_state);
+            } else if json["mute"] != serde_json::json!(null) {
+                let mute_state: tv::SetMuteState = serde_json::from_value(json["mute"].clone()).unwrap();
+                tv::set_mute_state(mute_state);
+            } else {
+                let _state: bool = serde_json::from_value(json).unwrap();
+                tv::set_power_state(_state);
             }
+            Ok(warp::reply::with_status("set volume state".to_string(), http::StatusCode::OK))
+        }
+
+        // Everything else is an arduino.
+        _ => {
+            let _state: bool = serde_json::from_value(json.clone()).unwrap();
+            let endpoint = match _state {
+                true => "on",
+                false => "off",
+            };
+            let url = device.get_api_url_with_param(endpoint.to_string(), device.guid.to_string());
+            isahc::get(url).unwrap().status().is_success();
+            Ok(warp::reply::with_status("ok".to_string(), http::StatusCode::OK))
         }
     }
 }
