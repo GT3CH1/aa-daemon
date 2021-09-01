@@ -1,11 +1,11 @@
 use aa_consts::*;
-use aa_models::device::GoogleDevice;
 use aa_models::*;
 use isahc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use warp::{http, Filter, Rejection};
+use aa_models::device::GoogleDevice;
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct DeviceState {
@@ -127,17 +127,17 @@ pub async fn run() {
     warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
 }
 
-fn auth_request() -> impl Filter<Extract = (String, String), Error = Rejection> + Copy {
+fn auth_request() -> impl Filter<Extract=(String, String), Error=Rejection> + Copy {
     warp::header::<String>("x-api-key").and(warp::header::<String>("x-auth-id"))
 }
 
 /// Used to filter a put request to change the system status
-fn sys_post() -> impl Filter<Extract = (DeviceState,), Error = warp::Rejection> + Clone {
+fn sys_post() -> impl Filter<Extract=(DeviceState, ), Error=warp::Rejection> + Clone {
     warp::body::content_length_limit(1024 * 16).and(warp::body::json())
 }
 
 /// Used to filter a put request to send an update to the database
-fn sys_put() -> impl Filter<Extract = (DeviceUpdate,), Error = warp::Rejection> + Clone {
+fn sys_put() -> impl Filter<Extract=(DeviceUpdate, ), Error=warp::Rejection> + Clone {
     warp::body::content_length_limit(1024 * 16).and(warp::body::json())
 }
 
@@ -150,7 +150,7 @@ async fn send_request(
     uid: String,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     if !check_auth(api_token, uid) {
-       return Err(warp::reject())
+        return Err(warp::reject());
     }
 
     let device = device::get_device_from_guid(&state.guid);
