@@ -175,7 +175,7 @@ async fn send_request(
         device::DeviceType::SPRINKLER => {
             // Match the device to a sprinkler zone
             let _state: bool = serde_json::from_value(json).unwrap();
-            let id = &device.last_state["id"].as_i64().unwrap();
+            let id = &device.last_state["index"].as_i64().unwrap();
             debug!(
                 "Device is a SQLSprinkler sprinkler with id {} and host ip {}",
                 id, device.ip
