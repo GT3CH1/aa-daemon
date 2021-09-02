@@ -2,6 +2,7 @@ use aa_consts::*;
 use aa_models::device::GoogleDevice;
 use aa_models::*;
 use isahc;
+use log::debug;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -175,10 +176,11 @@ async fn send_request(
             // Match the device to a sprinkler zone
             let _state: bool = serde_json::from_value(json).unwrap();
             let id = &device.last_state["id"].as_i64().unwrap();
-            println!(
+            debug!(
                 "Device is a SQLSprinkler sprinkler with id {} and host ip {}",
                 id, device.ip
             );
+            debug!("{}", device);
             let status = sqlsprinkler::set_zone(device.ip, _state, *id);
             let response = match status {
                 true => "ok",
