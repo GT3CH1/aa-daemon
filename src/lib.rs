@@ -156,7 +156,7 @@ async fn send_request(
 
     let device = device::get_device_from_guid(&state.guid);
     let json = state.state;
-
+    debug!("{:?}", json);
     match device.kind {
         device::DeviceType::SqlSprinklerHost => {
             // If the device is a sql sprinkler host, we need to send a request to it...
