@@ -1,11 +1,13 @@
 use aa_consts::*;
-use aa_models::device::GoogleDevice;
+use aa_models::device::{DeviceType, GoogleDevice, HardwareType};
 use aa_models::*;
 use isahc;
 use log::debug;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::str::FromStr;
+use uuid::Uuid;
 use warp::{http, Filter, Rejection};
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -32,6 +34,20 @@ struct DeviceUpdate {
 struct FirebaseToken {
     uid: String,
     token: String,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct DeviceDelete {
+    guid: String,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct DeviceCreate {
+    device_type: String,
+    sw_version: String,
+    hardware_type: String,
+    name: String,
+    nicknames: Vec<String>,
 }
 
 #[tokio::main]
@@ -70,12 +86,14 @@ pub async fn run() {
     let list_google_devices = warp::get()
         .and(warp::path("google"))
         .and(auth_request())
+        .and(warp::path::end())
         .and_then(list_devices_google);
 
     let get_device_status = warp::get()
         .and(warp::path("device"))
         .and(warp::path::param())
         .and(auth_request())
+        .and(warp::path::end())
         .map(|_guid: String, api_key: String, uid: String| {
             if !check_auth(api_key, uid) {
                 "".to_string()
@@ -118,27 +136,53 @@ pub async fn run() {
             }
             status
         });
+
+    let device_create = warp::put()
+        .and(warp::path("create"))
+        .and(warp::path::end())
+        .and(auth_request())
+        .and(device_create_filter())
+        .and_then(create_device);
+
+    let device_delete = warp::delete()
+        .and(warp::path("delete"))
+        .and(warp::path::end())
+        .and(auth_request())
+        .and(device_delete_filter())
+        .and_then(remove_device);
+
     let routes = set_sys_status
         .or(list_devices)
         .or(device_update)
         .or(device_update_arduino)
         .or(get_device_status)
         .or(list_google_devices)
+        .or(device_create)
+        .or(device_delete)
         .or(route);
     warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
 }
 
-fn auth_request() -> impl Filter<Extract = (String, String), Error = Rejection> + Copy {
+fn auth_request() -> impl Filter<Extract=(String, String), Error=Rejection> + Copy {
     warp::header::<String>("x-api-key").and(warp::header::<String>("x-auth-id"))
 }
 
 /// Used to filter a put request to change the system status
-fn sys_post() -> impl Filter<Extract = (DeviceState,), Error = warp::Rejection> + Clone {
+fn sys_post() -> impl Filter<Extract=(DeviceState, ), Error=warp::Rejection> + Clone {
     warp::body::content_length_limit(1024 * 16).and(warp::body::json())
 }
 
 /// Used to filter a put request to send an update to the database
-fn sys_put() -> impl Filter<Extract = (DeviceUpdate,), Error = warp::Rejection> + Clone {
+fn sys_put() -> impl Filter<Extract=(DeviceUpdate, ), Error=warp::Rejection> + Clone {
+    warp::body::content_length_limit(1024 * 16).and(warp::body::json())
+}
+
+fn device_create_filter() -> impl Filter<Extract=(DeviceCreate, ), Error=warp::Rejection> + Clone
+{
+    warp::body::content_length_limit(1024 * 16).and(warp::body::json())
+}
+
+fn device_delete_filter() -> impl Filter<Extract=(DeviceDelete, ), Error=warp::Rejection> + Clone {
     warp::body::content_length_limit(1024 * 16).and(warp::body::json())
 }
 
@@ -258,7 +302,7 @@ async fn list_devices_google(
 
         let json_output = serde_json::json!(json_arr);
         let output = format!("{}", json_output);
-        Ok(warp::reply::with_status(output, http::StatusCode::OK))
+        Ok(warp::reply::with_status(output, http::StatusCode::CREATED))
     }
 }
 
@@ -266,6 +310,71 @@ async fn list_devices_google(
 async fn do_device_update(_device: DeviceUpdate) -> Result<impl warp::Reply, warp::Rejection> {
     let status: String = database_update(_device);
     Ok(warp::reply::with_status(status, http::StatusCode::OK))
+}
+
+/// Removes a device from the database and the user account.
+async fn remove_device(
+    api_token: String,
+    uid: String,
+    device_delete: DeviceDelete,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    if !check_auth(api_token, uid.clone()) {
+        Err(warp::reject())
+    } else {
+        let status = device::remove_device(&uid, &device_delete.guid);
+        if status {
+            Ok(warp::reply::with_status("ok", http::StatusCode::OK))
+        } else {
+            debug!("Rejecting. Device GUID does not exist, cannot delete.");
+            Ok(warp::reply::with_status("GUID does not exist.", http::StatusCode::BAD_REQUEST))
+        }
+    }
+}
+
+/// Creates a new device
+async fn create_device(
+    api_token: String,
+    uid: String,
+    device_create: DeviceCreate,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    debug!("Creating a device.");
+    if !check_auth(api_token, uid.clone()) {
+        Err(warp::reject())
+    } else {
+        let mut new_device = device::Device::default();
+        let guid = Uuid::new_v4().to_hyphenated().to_string();
+        let mut err = false;
+        let device_type = match DeviceType::from_str(&device_create.device_type) {
+            Ok(d) => d,
+            Err(..) => {
+                err = true;
+                DeviceType::SWITCH
+            }
+        };
+        let hardware_type = match HardwareType::from_str(&device_create.hardware_type) {
+            Ok(t) => t,
+            Err(..) => {
+                err = true;
+                HardwareType::OTHER
+            }
+        };
+        new_device.kind = device_type;
+        new_device.guid = guid.clone();
+        new_device.useruuid = uid.clone();
+        new_device.sw_version = device_create.sw_version;
+        new_device.name = device_create.name;
+        new_device.nicknames = device_create.nicknames;
+        new_device.hardware = hardware_type;
+        device::add_device(&uid, new_device);
+        if err {
+            Err(warp::reject())
+        } else {
+            let message = json!({
+                "guid": guid
+            });
+            Ok(warp::reply::with_status(message.to_string(), http::StatusCode::OK))
+        }
+    }
 }
 
 /// Updates the device in the database.
