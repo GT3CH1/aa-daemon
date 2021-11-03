@@ -5,6 +5,7 @@ use isahc;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::thread;
 use std::collections::HashMap;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -238,18 +239,20 @@ async fn send_request(
 
         device::DeviceType::TV => {
             // Check if the device is a LG TV.
-            if json["volumeLevel"] != serde_json::json!(null) {
-                let vol_state: tv::SetVolState =
-                    serde_json::from_value(json["volumeLevel"].clone()).unwrap();
-                tv::set_volume_state(vol_state);
-            } else if json["mute"] != serde_json::json!(null) {
-                let mute_state: tv::SetMuteState =
-                    serde_json::from_value(json["mute"].clone()).unwrap();
-                tv::set_mute_state(mute_state);
-            } else {
-                let _state: bool = serde_json::from_value(json).unwrap();
-                tv::set_power_state(_state);
-            }
+            thread::spawn(move || {
+                if json["volumeLevel"] != serde_json::json!(null) {
+                    let vol_state: tv::SetVolState =
+                        serde_json::from_value(json["volumeLevel"].clone()).unwrap();
+                    tv::set_volume_state(vol_state);
+                } else if json["mute"] != serde_json::json!(null) {
+                    let mute_state: tv::SetMuteState =
+                        serde_json::from_value(json["mute"].clone()).unwrap();
+                    tv::set_mute_state(mute_state);
+                } else {
+                    let _state: bool = serde_json::from_value(json).unwrap();
+                    tv::set_power_state(_state);
+                }
+            });
             Ok(warp::reply::with_status(
                 "set volume state".to_string(),
                 http::StatusCode::OK,
@@ -263,8 +266,10 @@ async fn send_request(
                 true => "on",
                 false => "off",
             };
-            let url = device.get_api_url_with_param(endpoint.to_string(), device.guid.to_string());
-            isahc::get(url).unwrap().status().is_success();
+            thread::spawn(move || {
+                let url = device.get_api_url_with_param(endpoint.to_string(), device.guid.to_string());
+                isahc::get(url).unwrap().status().is_success();
+            });
             Ok(warp::reply::with_status(
                 "ok".to_string(),
                 http::StatusCode::OK,
